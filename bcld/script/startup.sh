@@ -1,0 +1,989 @@
+#!/bin/bash
+#
+# Copyright © 2024 Quintor B.V.
+#
+# BCLD is gelicentieerd onder de EUPL, versie 1.2 of
+# – zodra ze zullen worden goedgekeurd door de Europese Commissie -
+# latere versies van de EUPL (de "Licentie");
+# U mag BCLD alleen gebruiken in overeenstemming met de licentie.
+# U kunt een kopie van de licentie verkrijgen op:
+#
+# https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12
+#
+# Tenzij vereist door de toepasselijke wetgeving of overeengekomen in
+# schrijven, wordt software onder deze licentie gedistribueerd
+# gedistribueerd op een "AS IS"-basis,
+# ZONDER ENIGE GARANTIES OF VOORWAARDEN, zowel
+# expliciet als impliciet.
+# Zie de licentie voor de specifieke taal die van toepassing is
+# en de beperkingen van de licentie.
+#
+#
+# Copyright © 2024 Quintor B.V.
+#
+# BCLD is licensed under the EUPL, Version 1.2 or 
+# – as soon they will be approved by the European Commission -
+# subsequent versions of the EUPL (the "Licence");
+# You may not use BCLD except in compliance with the Licence.
+# You may obtain a copy of the License at:
+#
+# https://joinup.ec.europa.eu/collection/eupl/eupl-text-eupl-12
+#
+# Unless required by applicable law or agreed to in
+# writing, software distributed under the License is
+# distributed on an "AS IS" basis,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
+# express or implied.
+# See the License for the specific language governing
+# permissions and limitations under the License.
+# 
+#
+# BCLD Startup
+# Very essential script for the BCLD client, which contains most of the
+# configurations necessary before booting the online webkiosk.
+#
+# This script is the heart of BCLD and where BCLD will boot the Chromium
+# Node webapp after configuring the network, audio, video and other
+# hardware settings.
+#
+#set -x
+
+# Load TEST package OR trap inside RELEASE/DEBUG
+if [[ "${BCLD_MODEL}" == 'test' ]] \
+    && [[ -f "${BCLD_TEST}" ]]; then
+	# If TEST, load package
+	source '/usr/bin/bcld_test.sh'
+else
+	# If not TEST, trap
+	trap '' SIGHUP SIGINT SIGQUIT SIGTERM SIGTSTP
+fi
+
+# Imports
+source '/usr/bin/echo_tools.sh'
+
+# ENVs
+if [[ $(/usr/bin/apt-cache show "${BCLD_RUN}" | /usr/bin/wc -l) -gt 0 ]]; then
+    # If BCLD_RUN is a DEB, grab version
+	BCLD_APP_VERSION="$(/usr/bin/apt-cache show "${BCLD_RUN}" | /usr/bin/grep 'Version:' | cut -d ' ' -f2) (${BCLD_RUN})" \
+		&& export BCLD_APP_VERSION
+else
+    # If BCLD_RUN is an AppImage, grab version from name
+    BCLD_APP_VERSION="$(/usr/bin/echo ${BCLD_APP} | /usr/bin/cut -d '_' -f2)" \
+		&& export BCLD_APP_VERSION
+
+fi
+
+BCLD_KERNEL_VERSION="$(/usr/bin/uname -r)" \
+	&& export BCLD_KERNEL_VERSION
+
+BCLD_VERSION_STRING="$(/usr/bin/cat /VERSION)" \
+	&& export BCLD_VERSION_STRING
+
+# VARs
+TAG="RUN-LIVE"
+
+## Paths
+CDROM="/dev/cdrom"
+DHCP_LEASE="/var/lib/dhcp/dhclient.leases"
+MACHINE_ID='/etc/machine-id'
+SROM="/dev/sr0"
+XT_DIR="${HOME}/xterm"
+QT_CONFIG="${HOME}/.config/qutebrowser/config.py"
+
+## Parameters
+APP_DEBUG_PORT='12253'
+CLIENT_DEBUG_PORT='2253'
+CMD_LINE=$(/usr/bin/cat /proc/cmdline)
+PACTL_DEFAULT_VOL=125
+PACTL_DEFAULT_REC=100
+VENDORLESS_PARAM='c.url.start_pages'
+
+
+## PACTL scans sinks 20 times before it continues, each scan has a 1s sleep timer
+PACTL_SCANS='20'
+## SCAN_TRIES before giving up on LAN, or shutting down after WLAN
+SCAN_TRIES='3'
+
+# FUNCTIONS
+
+## Function to create directories with root permission
+function prep_dir () {
+    if [[ ! -d ${1} ]]; then
+        list_item "${1} does not exist yet! Creating..."
+        /usr/bin/sudo /usr/bin/mkdir -pv "${1}" || exit
+    fi    
+}
+
+## Function to lazy force umounts if mounted
+function lf_umount () {
+    if [[ $(/usr/bin/mount -l | /usr/bin/grep -c "${1}") -gt 0 ]]; then
+        list_item "${1} mounted! Unmounting..."
+        /usr/bin/sudo /usr/bin/umount -lf "${1}"
+    fi    
+}
+
+## Function to take key/value from CMD_LINE, and change it to whatever we need.
+function readparam () {
+    
+    # Loop through CMD_LINE.
+    for KERNEL_PARAM in ${CMD_LINE}; do
+        
+        # Match whatever we are looking for.
+        if [[ $KERNEL_PARAM == "${2}"* ]]; then
+            # Strip that value and give it to a new export.
+            KERNEL_PARAM=$(/usr/bin/echo "${KERNEL_PARAM}" | /usr/bin/sed 's/=/ /')
+            IFS=' ' read -r NAME VALUE <<< "${KERNEL_PARAM}"
+            export "${1}"="${VALUE}"
+            break
+        fi
+    done
+}
+
+## Function to read every BCLD Boot Parameter
+function read_all_params() {
+
+	list_item 'Reading all BCLD boot parameters'
+
+	### Afname
+	readparam "${AFNAME_PARAM}" "${AFNAME_ALIAS}"
+	readparam "${BIG_MOUSE_PARAM}" "${BIG_MOUSE_ALIAS}"
+	readparam "${LEFT_MOUSE_PARAM}" "${LEFT_MOUSE_ALIAS}"
+	readparam "${RESTART_PARAM}" "${RESTART_ALIAS}"
+	readparam "${SHUTDOWN_PARAM}" "${SHUTDOWN_ALIAS}"
+	readparam "${LOGGING_PARAM}" "${LOGGING_ALIAS}"
+	readparam "${VENDOR_PARAM}" "${VENDOR_ALIAS}"
+	readparam "${ZOOM_PARAM}" "${ZOOM_ALIAS}"
+
+	### Audio
+	readparam "${AUDIO_ALSA_SINK_PARAM}" "${AUDIO_ALSA_SINK_ALIAS}"
+	readparam "${AUDIO_ALSA_PORT_PARAM}" "${AUDIO_ALSA_PORT_ALIAS}"
+	readparam "${AUDIO_COMBINE_PARAM}" "${AUDIO_COMBINED_SINK_ALIAS}"
+	readparam "${AUDIO_RECORD_PARAM}" "${AUDIO_RECORDING_ALIAS}"
+	readparam "${AUDIO_RESTORE_PARAM}" "${AUDIO_RESTORE_ALIAS}"
+	readparam "${AUDIO_SINK_PARAM}" "${AUDIO_DEFAULT_SINK_ALIAS}"
+	readparam "${AUDIO_SOURCE_PARAM}" "${AUDIO_DEFAULT_SOURCE_ALIAS}"
+	readparam "${AUDIO_VOLUME_PARAM}" "${AUDIO_DEFAULT_PLAYBACK_ALIAS}"
+
+	### Display
+	readparam "${DISPLAY_BRIGHTNESS_PARAM}" "${DISPLAY_BRIGHTNESS_ALIAS}"
+	readparam "${DISPLAY_PRESET_PARAM}" "${DISPLAY_PRESET_ALIAS}"
+	readparam "${DISPLAY_RESOLUTION_PARAM}" "${DISPLAY_RESOLUTION_ALIAS}"
+	readparam "${DISPLAY_ROTATE_PARAM}" "${DISPLAY_ROTATE_ALIAS}"
+	readparam "${DISPLAY_SCALE_PARAM}" "${DISPLAY_SCALE_ALIAS}"
+	readparam "${DISPLAY_SCREENSAVER_PARAM}" "${DISPLAY_SCREENSAVER_ALIAS}"
+
+	### Network
+	readparam "${DEFAULT_INTERFACE_PARAM}" "${DEFAULT_INTERFACE_ALIAS}"
+	readparam "${NETWORK_CHECK_PARAM}" "${NETWORK_CHECK_ALIAS}"
+	readparam "${WIFI_PSK_PARAM}" "${WIFI_PSK_ALIAS}"
+	readparam "${WIFI_SSID_PARAM}" "${WIFI_SSID_ALIAS}"
+	readparam "${WOL_DISABLED_PARAM}" "${WOL_DISABLED_ALIAS}"
+	readparam "${WWAN_ENABLED_PARAM}" "${WWAN_ENABLED_ALIAS}"
+	
+	#### EDUROAM
+	readparam "${WIFI_EAP_AUTH_PARAM}" "${WIFI_EAP_AUTH_ALIAS}"
+	#readparam "${WIFI_EAP_DOMAIN_PARAM}" "${WIFI_EAP_DOMAIN_ALIAS}"
+	readparam "${WIFI_EAP_METHOD_PARAM}" "${WIFI_EAP_METHOD_ALIAS}"
+	readparam "${WIFI_EAP_PASSWD_PARAM}" "${WIFI_EAP_PASSWD_ALIAS}"
+	readparam "${WIFI_EAP_USER_PARAM}" "${WIFI_EAP_USER_ALIAS}"
+}
+
+# Function to execute casper-md5check manually
+function BCLD_MD5CHECK () {
+	
+	if [[ -f "${BCLD_MD5CHECK}" ]]; then
+	    list_item "Casper MD5check has passed, check ${BCLD_MD5CHECK}!"
+	else
+	    if [[ ${BCLD_VERBOSE} -eq 1 ]]; then
+	        list_item "Running casper-md5check..."
+		    list_entry
+		    /usr/bin/sudo /usr/lib/casper/casper-md5check /cdrom /cdrom/md5_file | /usr/bin/tee "${BCLD_MD5CHECK}"
+		    list_catch
+	    else
+		    /usr/bin/sudo /usr/lib/casper/casper-md5check /cdrom /cdrom/md5_file > "${BCLD_MD5CHECK}"
+		    list_item "Casper $(/usr/bin/cat "${BCLD_MD5CHECK}" | /usr/bin/grep 'Check finished:')"
+	    fi
+    fi
+}
+
+# Function to umount important directories
+function bcld_umount () {
+	
+	# Alternative Casper (if Plymouth not working)
+	# Can only be done right before unmounting
+	BCLD_MD5CHECK
+	
+	list_item "Unmounting necessary devices"
+	lf_umount /cdrom
+	lf_umount /media/BCLD-USB
+	lf_umount "${CDROM}"
+	lf_umount "${SROM}"
+	list_item_pass "It is now safe to remove BCLD-USB (if bcld.log is not present)."
+	/usr/bin/sleep 3s
+}
+
+# Function to to load Realtek kernel modules
+function realtek_modules () {
+	if [[ "$(/usr/bin/dpkg -l | /usr/bin/grep 'r8168-dkms' | /usr/bin/wc -l)" -gt 0 ]]; then
+		list_item 'Realtek 8168 detected!'
+		list_item_pass 'Using Realtek 8168!'
+	else
+		list_item_pass 'Using Realtek 8821ce (default)'
+	fi
+}
+
+# Function to check for Nvidia kernel modules
+# function nvidia_modules () {
+
+#     NVIDIA_MODULES="$(/usr/bin/find /lib/modules/"$(/usr/bin/uname -r)"/kernel/ -maxdepth 1 -type d -name 'nvidia*' | /usr/bin/wc -l)"
+
+#     if [[ ${NVIDIA_MODULES} -gt 0 ]]; then
+        
+#         silent_item_pass 'Nvidia modules installed...'
+#         export BCLD_NVIDIA='installed'
+        
+#         if [[ $(/usr/bin/lsmod | /usr/bin/grep -c 'nvidia') -gt 0 ]]; then
+#             silent_item_pass 'Nvidia modules loaded!'
+#             export BCLD_NVIDIA='loaded'
+
+#             if [[ -x /usr/bin/nvidia-smi ]] && [[ -x /usr/bin/nvidia-detector ]]; then
+#                     if [[ ${BCLD_VERBOSE} -eq 1 ]]; then
+#                         list_item_pass 'Nvidia driver detected!'
+#                         list_entry
+#                         /usr/bin/sudo nvidia-smi
+#                         list_catch
+#                     else
+#                         list_item_pass "Nvidia driver detected: $(/usr/bin/nvidia-detector)"
+#                     fi
+#                     export BCLD_NVIDIA='detected'
+#             else
+#                 list_item_fail "Unable to detect Nvidia driver!"
+#                 export BCLD_NVIDIA='undetected'
+#             fi
+            
+#         else
+#             list_item_fail 'Nvidia modules could not be loaded!'
+#             export BCLD_NVIDIA='not loaded'
+#         fi
+#     fi
+# }
+
+## To list BCLD_OPTS
+function get_vendor_opts () {
+	list_item "Currently set BCLD_OPTS: ${BCLD_OPTS}"
+}
+
+## Function to detect MAC and IP after BCLD_IF has been set and connection has been made
+function ip_link () {
+        if [[ -n "${BCLD_IF}" ]]; then
+        	
+        	list_item 'Fetching MAC and IP addresses...'
+			
+			if [[ -z "${BCLD_CHECK}" ]] || [[ "${BCLD_CHECK}" == 0 ]]; then
+			    list_item_pass "BCLD_CHECK is set to: ${BCLD_CHECK}"
+			    list_item 'Skipping network check...'
+			
+		    # Only perform network check on BCLD_URL (trusted) if present
+			elif [[ -n "${BCLD_URL}" ]]; then
+			    list_item_pass "Performing network check on: \"${BCLD_URL}\""
+			    BCLD_DOWNLOAD="$(/usr/bin/curl -L -s -o /dev/null -w '%{speed_download}' --max-time 10 "${BCLD_URL}")" \
+					&& export BCLD_DOWNLOAD
+			    
+			    # If BCLD_URL is set, but network check fails, this network is unstable
+			    if [[ "${BCLD_DOWNLOAD}" -eq 0 ]]; then
+			        list_item_fail 'Network check failed!'
+			        trap_shutdown 'net'
+			    fi
+			    
+			fi
+			
+			BCLD_IP="$(/usr/sbin/ip address | /usr/bin/grep "${BCLD_IF}" | /usr/bin/grep inet | /usr/bin/awk '{ print $2 }' | /usr/bin/cut -d '/' -f1 | /usr/bin/head -n 1)" \
+				&& export BCLD_IP
+		    BCLD_MAC="$(/usr/sbin/ip link show "${BCLD_IF}" | /usr/bin/grep link | /usr/bin/awk '{ print $2 }')" \
+				&& export BCLD_MAC
+		    BCLD_SPEED="$(/usr/sbin/ip a | /usr/bin/grep "${BCLD_IF}" | /usr/bin/grep 'qlen' | /usr/bin/awk '{print $NF}')" \
+				&& export BCLD_SPEED
+
+			BCLD_DISCARDED="$(/usr/bin/netstat --statistics | /usr/bin/grep 'incoming packets discarded' | /usr/bin/awk '{ print $1 }')"
+			BCLD_DROPPED="$(/usr/bin/netstat --statistics | /usr/bin/grep 'outgoing packets dropped' | /usr/bin/awk '{ print $1 }')"
+			
+			PACKET_LOSS="$(( BCLD_DROPPED + BCLD_DISCARDED ))"
+	    else
+        	list_item 'Unable to fetch MAC and IP addresses, check BCLD_IF!'
+	    fi
+}
+
+## Function to set BCLD_IF to wireless if still empty
+function set_bcld_wireless () {
+	# If BCLD_IF is still empty, it means we're going wireless
+	if [[ -z "${BCLD_IF}" ]]; then   
+		list_item "Setting default wireless interface..."
+		if_dir="$(/usr/bin/find /sys/class/ieee80211/*/device/net -mindepth 1 -maxdepth 1 -type d | /usr/bin/head -n 1)"
+		BCLD_IF="$(/usr/bin/basename "${if_dir}")" \
+			&& export BCLD_IF
+	fi
+}
+
+## Function to set BCLD_EAP_AUTH if still empty
+function set_EAP_AUTH () {
+	if [[ -z "${BCLD_EAP_AUTH}" ]]; then   
+		BCLD_EAP_AUTH='mschapv2' \
+			&& export BCLD_EAP_AUTH
+	fi
+	
+	list_item "Setting default EAP authentication method: ${BCLD_EAP_AUTH}"
+}
+
+## Function to connect to PSK
+function connect_psk () {
+
+	# 4TW customization: Ethernet startup checks disabled; Wi-Fi only
+	# detect_lan # Always prioritize LAN
+	
+	# Connect to PSK only when no DHCP lease exists yet.
+	if [[ ! -s "${DHCP_LEASE}" ]]; then
+		list_item 'Attempting to connect (WPA-PSK)'
+		
+		list_entry
+		/usr/bin/sudo /usr/bin/nmcli device wifi connect "${ssid_decoded}" password "$(/usr/bin/echo "${BCLD_PSK}" | /usr/bin/base64 -d)"
+		list_catch
+		
+		# This method requires BCLD_IF
+		set_bcld_wireless
+		
+		connect_wifi "${BCLD_IF}"
+	fi
+
+}
+
+## Function to connect to EAP
+function connect_eap () {
+
+	# 4TW customization: Ethernet startup checks disabled; Wi-Fi only
+	# detect_lan # Always prioritize LAN
+
+	# Connect to EAP only when no DHCP lease exists yet.
+	if [[ ! -s "${DHCP_LEASE}" ]]; then
+    	list_item 'Attempting to connect (WPA-EAP)...'
+    	
+		# This method requires BCLD_IF and BCLD_EAP_AUTH
+		set_bcld_wireless
+		set_EAP_AUTH
+
+		/usr/bin/sudo /usr/bin/nmcli con add \
+			type wifi \
+			con-name 'eduroam' \
+			ifname "${BCLD_IF}" \
+			ssid "${ssid_decoded}" \
+			wifi-sec.key-mgmt "wpa-eap" \
+			802-1x.identity "$(/usr/bin/echo "${BCLD_EAP_USER}" | /usr/bin/base64 -d)" \
+			802-1x.password "$(/usr/bin/echo "${BCLD_EAP_PW}" | /usr/bin/base64 -d)" \
+			802-1x.eap "${BCLD_EAP_METHOD}" \
+			802-1x.phase2-auth "${BCLD_EAP_AUTH}"
+
+		/usr/bin/sudo /usr/bin/nmcli connection up 'eduroam'
+		
+		connect_wifi "${BCLD_IF}"
+	fi
+
+}
+
+## Function to connect to LAN, if no other lease
+function connect_lan () {
+
+	attempt=1
+	
+	# Only do this if there is no DHCP lease yet
+	while [[ ! -s "${DHCP_LEASE}" ]] \
+		&& [[ "$(/usr/bin/grep -cs 'interface' "${DHCP_LEASE}")" -eq 0 ]]; do
+		
+		list_item "Attempting to establish wired connection on: ${1} (attempt: #${attempt})"
+		/usr/bin/sudo /usr/sbin/dhclient "${1}" &> /dev/null
+		
+		# Break out after SCAN_TRIES
+		if [[ "${attempt}" -eq "${SCAN_TRIES}" ]]; then
+			list_item_fail "Tried ${attempt} times... Giving up."
+			break
+		fi
+		
+		((attempt++))
+
+	done
+		
+}
+
+## Function to detect LAN, if more than 1
+function detect_lan () {
+	list_item 'Checking wired interfaces...'
+	
+	WIRED_IF="$(/usr/bin/find /sys/class/net/ -name "en*" -exec basename {} \;)"
+	
+	if [[ $(/usr/bin/echo "${WIRED_IF}" | /usr/bin/wc -l) -gt 1 ]]; then
+		
+		for interface in ${WIRED_IF}; do
+			connect_lan "${interface}"
+		done
+		
+	else
+		connect_lan "${WIRED_IF}"
+	fi
+}
+
+## Function to connect to WiFi, if no other lease
+function connect_wifi () {
+	# Initiate DHCP on selected interface
+	if [[ -n ${1} ]]; then
+	
+		attempt=1
+
+		# Only do this if there is no DHCP lease yet
+		while [[ ! -s "${DHCP_LEASE}" ]]; do
+			list_item "Attempting to establish WiFi connection on: ${1} (attempt: #${attempt})"
+			/usr/bin/sudo /usr/sbin/dhclient "${1}" &> /dev/null
+			
+			# Break out after SCAN_TRIES
+			if [[ "${attempt}" -eq "${SCAN_TRIES}" ]]; then
+				list_item_fail "Tried ${attempt} times... Giving up."
+				break
+    		fi
+
+			((attempt++))
+			
+		done
+	fi
+}
+
+## Function to display established connection
+function connect_establish () {
+
+	### DHCP fix
+	# 4TW customization: restrict DHCP renewal to the selected Wi-Fi interface.
+	if [[ -n "${BCLD_IF}" ]]; then
+		/usr/bin/sudo dhclient -r "${BCLD_IF}" &>/dev/null
+		/usr/bin/sudo dhclient "${BCLD_IF}"
+	fi
+
+	# Set BCLD_IF if it exists
+	BCLD_IF="$(/usr/sbin/ip route | /usr/bin/grep -v 'linkdown' | /usr/bin/grep -m1 'default' | /usr/bin/awk '{ print $5 }')" \
+		&& export BCLD_IF
+
+	# If there is no DHCP_LEASE AND no BCLD_IF, shutdown
+	if [[ ! -s "${DHCP_LEASE}" ]] && [[ -z "${BCLD_IF}" ]]; then
+		list_item_fail "Unable to connect to any networks!"
+		last_item
+		trap_shutdown 'net'
+	else
+		# Display BCLD_IF
+		list_item_pass "Connection established on: ${BCLD_IF}"
+
+		# Detect MAC and IP for connection for BCLD_IF
+		ip_link
+	fi
+}
+
+## Function to enable Wake-on-LAN (if supported)
+function enable_wol () {
+
+	if [[ -n "${BCLD_IF}" ]]; then
+		
+		list_item 'Default interface found for WOL...'
+		
+		# Check if WOL is supported and enable only when so
+		if  [[ $(/usr/bin/sudo /usr/sbin/ethtool "${BCLD_IF}" | /usr/bin/grep -c 'Supports Wake-on') -gt 0 ]]; then
+
+			list_item_pass "Wake-on-LAN supported on: ${BCLD_IF}" 
+			
+			/usr/bin/sudo /usr/sbin/ethtool --change "${BCLD_IF}" wol g && list_item 'Wake-on-LAN enabled!'
+
+		else
+			list_item_fail "Wake-on-LAN is not supported on this system..."
+		fi
+
+	else
+		list_item_fail "No default interface for WOL..."
+	fi
+}
+
+## Function that loops through the sinks in SINKS_JSON and lists them on the screen
+function detect_sinks_and_ports () {
+
+    COUNT_DETECTED_SINKS="$(/usr/bin/echo "${SINKS_JSON}" | /usr/bin/jq length)"
+    SINK_ENTRIES="$(( $(/usr/bin/echo "${SINKS_JSON}" | /usr/bin/jq length) -1))"
+
+    # List counted sinks if not empty
+    if [[ -n "${COUNT_DETECTED_SINKS}" ]]; then
+    	list_item "${COUNT_DETECTED_SINKS} sinks detected."
+    fi
+
+    SINK_INDEX=0
+    while [[ "${SINK_INDEX}" -le "${SINK_ENTRIES}" ]]; do
+
+        # Get sink name
+        SINK_NAME="$(/usr/bin/echo "${SINKS_JSON}" | /usr/bin/jq -r ".[${SINK_INDEX}] | .name")"
+        list_item "Sink detected: ${SINK_NAME}"
+        
+        # Get number of port entries
+        PORT_NUM="$(( $(/usr/bin/echo "${SINKS_JSON}" | /usr/bin/jq ".[${SINK_INDEX}] | .ports" | /usr/bin/jq length) -1))"
+
+        PORT_INDEX=0
+        while [[ "${PORT_INDEX}" -le "${PORT_NUM}" ]]; do
+        
+            # Get port name
+            PORT_NAME="$(/usr/bin/echo "${SINKS_JSON}" | /usr/bin/jq -r ".[${SINK_INDEX}] | .ports | .[${PORT_INDEX}] | .name")"
+            
+            list_item_pass "Port detected: ${PORT_INDEX}: ${PORT_NAME}"
+            
+            (( PORT_INDEX++ ))
+        done
+
+        (( SINK_INDEX++ ))
+    done
+}
+
+## Function to launch, enables users to read feedback if too fast
+function launch () {
+	last_item 'Launching BCLD...'
+	(/usr/bin/sleep 3s) && /usr/bin/bash -c "${BCLD_LAUNCH_COMMAND}"
+}
+
+## Function to start app
+function init_app () {
+
+    # The app must be installed
+    if [[ -x $(/usr/bin/which "${BCLD_RUN}") ]]; then
+        
+        if [[ ${BCLD_VERBOSE} -eq 1 ]]; then
+    		# Set BCLD_LAUNCH_COMMAND (verbose)
+        	BCLD_LAUNCH_COMMAND="startx openbox-session"
+    	else
+    		# Set BCLD_LAUNCH_COMMAND (hide)
+    		BCLD_LAUNCH_COMMAND="startx openbox-session &> /dev/null"
+        fi
+
+		# Export the selected launch command
+		export BCLD_LAUNCH_COMMAND
+        
+        if [[ "${BCLD_MODEL}" == 'test' ]] \
+            && [[ -f "${BCLD_TEST}" ]]; then
+	    	# TEST needs to save ENVs for other TTYs (remote)
+	    	write_ENVs
+	    	
+	    	# Only TEST can escape the app and reset the terminal
+	    	# launch
+	        reset_terminal
+        else
+            # If not TEST, launch the app normally but shutdown if it halts
+            launch
+            /usr/bin/sudo /usr/sbin/poweroff
+        fi
+
+    else
+        list_item_fail "App not found!"
+        last_item "Please check contents of /opt..."
+    fi
+}
+
+# EXE
+## Configurations
+list_header "Configuring BCLD"
+
+## Ubuntu 26 LTS requires custom images to manually start PipeWire components
+### PipeWire
+/usr/bin/dbus-run-session -- /usr/bin/pipewire &> "${BCLD_AUDIO_LOG}" &
+/usr/bin/sleep 1s && [[ -n "$(/usr/bin/pidof pipewire)" ]] && list_item_pass "Started PipeWire daemon!" || list_item_pass "Unable to start PipeWire daemon!"
+### WirePlumber
+/usr/bin/dbus-run-session -- /usr/bin/wireplumber &>> "${BCLD_AUDIO_LOG}" &
+/usr/bin/sleep 1s && [[ -n "$(/usr/bin/pidof wireplumber)" ]] && list_item_pass "Started WirePlumber!" || list_item_pass "Unable to start WirePlumber!"
+### PipeWire Pulse
+/usr/bin/dbus-run-session -- /usr/bin/pipewire-pulse &>> "${BCLD_AUDIO_LOG}" &
+/usr/bin/sleep 1s && [[ -n "$(/usr/bin/pidof pipewire-pulse)" ]] && list_item_pass "Started PipeWire Pulse!" || list_item_pass "Unable to start PipeWire Pulse!"
+
+### Read BCLD Sound Check parameter early
+readparam "${AUDIO_SOUNDCHECK_PARAM}" "${AUDIO_SOUNDCHECK_ALIAS}"
+
+if [[ "${BCLD_SOUNDCHECK}" -eq 1 ]]; then
+    list_item_pass 'BCLD Sound Check enabled!'
+fi
+
+print_item "Checking for sound card(s)"
+
+# Give systems time to start Pulse Audio
+for scan in $(/usr/bin/seq 1 20); do
+	/usr/bin/pactl get-default-sink | /usr/bin/grep -qv null && break
+	/usr/bin/printf "." && /usr/bin/sleep 1s
+done
+
+/usr/bin/echo
+
+# When started, we can now use Pulse Audio controls
+BCLD_SINKS="$(/usr/bin/pactl list short sinks  | /usr/bin/awk '{ print $2 }' )" \
+	&& export BCLD_SINKS
+
+# If no BCLD_SINKS can be found, or if PA sets it to (auto_)null, take action based on BCLD_MODEL
+if [[ -z "${BCLD_SINKS}" ]] \
+	|| [[ "${BCLD_SINKS}" == 'null' ]] \
+	|| [[ "${BCLD_SINKS}" == 'auto_null' ]]; then
+	
+	# This means no outputs can be found
+	# Do not allow boot without sound devices
+	# Only do this for BCLD_SOUNDCHECK
+	if [[ "${BCLD_SOUNDCHECK}" -eq 1 ]]; then
+		trap_shutdown 'snd'
+	else
+		# Ignore sound devices on DEBUG and TEST, not without warning
+		list_item_fail 'Unable to detect any sound cards!'
+	fi
+else
+	list_item_pass "Sound card(s) found!"
+fi
+# SINKS found with pactl and output in JSON. Used throughout code
+SINKS_JSON="$(/usr/bin/pactl --format json list sinks)"
+
+## Read BCLD_VERBOSE first
+readparam "${VERBOSE_PARAM}" "${VERBOSE_ALIAS}"
+
+## Read the rest of the parameters here.
+read_all_params
+
+## Check Realtek modules
+realtek_modules
+
+## Check if running BCLD Nvidia (DISCONTINUED)
+# nvidia_modules
+
+## ALTERNATE MODES
+if [[ ${BCLD_MODEL} != 'release' ]]; then
+    # If not RELEASE, enable DEBUG port (also for TEST)
+
+    BCLD_OPTS="${BCLD_OPTS} --remote-debugging-port=${APP_DEBUG_PORT}" \
+		&&	export BCLD_OPTS
+
+	# Check if CLIENT_DEBUG_PORT in use
+    if [[ $(/usr/bin/ss -ptln | /usr/bin/grep -c ${CLIENT_DEBUG_PORT}) -eq 0 ]]; then
+        list_item "Setting remote port: ${CLIENT_DEBUG_PORT}"
+        /usr/bin/socat TCP-Listen:${CLIENT_DEBUG_PORT},fork TCP:127.0.0.1:${APP_DEBUG_PORT} &
+        list_item "Remote port set!"
+    fi
+
+fi
+
+### Generic Configurations
+
+#### Darken XTerm output unless enabled
+if [[ ${BCLD_VERBOSE} -eq 1 ]]; then
+	# Use alternate config for BCLD_VERBOSE
+	list_item_pass "BCLD_VERBOSE set to: ${BCLD_VERBOSE}"
+	/usr/bin/cp "${XT_DIR}/XTerm.white" "${HOME}/XTerm"
+else
+	# Use default config without BCLD_VERBOSE
+	list_item "BCLD_VERBOSE set to: ${BCLD_VERBOSE}"
+	/usr/bin/cp "${XT_DIR}/XTerm.black" "${HOME}/XTerm"
+fi
+
+#### Configure BCLD Big Mouse
+if [[ "${BCLD_BIG_MOUSE}" -eq 1 ]] && [[ -f "${HOME}/big-cursor.pcf.gz" ]]; then
+	list_item_pass "Setting BCLD Big Mouse: ${BCLD_BIG_MOUSE}"
+    /usr/bin/cp "${HOME}/big-cursor.pcf.gz" /usr/share/fonts/X11/misc/cursor.pcf.gz
+
+	/usr/bin/cat <<- EOF | /usr/bin/sudo /usr/bin/tee /usr/share/icons/default/index.theme &> /dev/null
+	[Icon Theme]
+	Inherits=big-cursor
+	EOF
+
+	list_item 'BCLD Big Mouse enabled!'
+fi
+
+
+### Vendor Configurations
+if [[ "${BCLD_VENDOR}" == 'vendorless' ]]; then
+    # Vendor features don't work without the BCLD app
+    # Unset BCLD_OPTS if running Vendorless BCLD
+    unset 'BCLD_OPTS'
+    
+    # Configure Vendorless URL if not set
+    if [[ "$(/usr/bin/grep -c "${VENDORLESS_PARAM}" "${QT_CONFIG}")" -eq 0 ]]; then
+        if [[ -n "${BCLD_URL}" ]]; then
+            list_item "Adding BCLD_URL to BCLD_OPTS..."
+            list_entry
+	        /usr/bin/echo -e "${VENDORLESS_PARAM} = \"${BCLD_URL}\"" | /usr/bin/tee -a "${QT_CONFIG}"
+	        list_catch
+        else
+            list_item "Using default BCLD URL..."
+            list_entry
+            /usr/bin/echo -e "${VENDORLESS_PARAM} = \"${BCLD_DEFAULT_URL}\"" | /usr/bin/tee -a "${QT_CONFIG}"
+            list_catch
+        fi
+    fi
+else
+
+    # Always execute BCLD VENDOR script if not Vendorless    
+    /usr/bin/sudo /usr/bin/bcld_vendor.sh
+
+    # Add VENDOR PARAM if 'wft'
+    if [[ "${BCLD_VENDOR}" == 'wft' ]]; then
+        BCLD_OPTS="${BCLD_OPTS} --vendor=wftbsb"
+    fi
+
+    # Configure BCLD Overwrite URL
+    if [[ -n "${BCLD_URL}" ]]; then
+	    BCLD_OPTS="${BCLD_OPTS} --facet-overwrite-url=${BCLD_URL}"
+	    list_item_pass "BCLD_URL added to BCLD_OPTS"
+    fi
+
+    # Configure BCLD Zoom
+    if [[ "${BCLD_ZOOM}" -eq 1 ]]; then
+	    BCLD_OPTS="${BCLD_OPTS} --zoom"
+	    list_item_pass "ZOOM added to BCLD_OPTS"
+    fi
+
+	# Configure BCLD Client Shutdown Timer
+    if [[ -n "${BCLD_SHUTDOWN}" ]]; then
+
+		list_item_pass "BCLD_SHUTDOWN detected: ${BCLD_SHUTDOWN}"
+		list_entry
+	    /usr/sbin/shutdown "${BCLD_SHUTDOWN}"
+		list_catch
+    fi
+
+	# Configure BCLD Restart Timer
+    if [[ -n "${BCLD_RESTART}" ]]; then
+
+		list_item_pass "BCLD_RESTART detected: ${BCLD_RESTART}"
+		list_entry
+	    /usr/sbin/shutdown -r "${BCLD_RESTART}"
+		list_catch
+    fi
+
+	# Extra BCLD logging
+	if [[ "${BCLD_LOGGING}" -eq 1 ]]; then
+		BCLD_OPTS="${BCLD_OPTS} --enableLogging --logfile=/opt/bcld_log.json"
+		list_item_pass "LOGGING added to BCLD_OPTS"
+	fi
+
+	# Export the desired configuration
+	export BCLD_OPTS
+fi
+
+### Show BCLD_OPTS
+get_vendor_opts
+
+## Audio settings
+
+### Reload Alsa to fix potential problems with module latency
+if [[ ${BCLD_ALSA_RESTORE} -eq 1 ]]; then
+	list_item "Restoring ALSA configuration..."
+	list_entry
+	/usr/bin/sudo /usr/sbin/alsactl restore
+	list_catch
+fi
+
+### Detect sinks
+detect_sinks_and_ports
+
+### Sink (always exclusive)
+if [[ ${BCLD_SINK} ]]; then
+    list_item "Setting BCLD audio sink..."
+    /usr/bin/pactl set-default-sink "${BCLD_SINK}" \
+        || list_item "BCLD_SINK: ${BCLD_SINK} not found!"
+    unset BCLD_COMBINE
+fi
+
+### Special devices
+
+#### Add J520C if it is found on startup
+if /usr/bin/grep -q 'J520C' /proc/asound/cards; then
+	list_item_pass 'JBL 520c USB detected!'
+	/usr/bin/pactl load-module module-alsa-sink device=hw:J520C sink_name='J520C' &> /dev/null
+	/usr/bin/pactl set-default-sink 'J520C'
+fi
+
+### Combined sinks
+if [[ ${BCLD_COMBINE} = 1 ]]; then
+    
+    list_item "Combining BCLD sinks..."
+    
+    /usr/bin/pactl load-module module-combine-sink sink_name=combined
+    /usr/bin/pacmd set-default-sink combined
+fi
+
+### ALSA configurations
+
+# check if BCLD_ALSA_SINK and BCLD_ALSA_PORT contain a value
+if [[ ! -z "${BCLD_ALSA_SINK}" ]] && [[ ! -z "${BCLD_ALSA_PORT}" ]]; then
+    SINK_INDEX=0
+    
+    # check for SINK and PORT combinations
+    # this is to prevent overriding the SINK and PORT when PXE booting
+    while [[ "${SINK_INDEX}" -le "${SINK_ENTRIES}" ]]; do
+
+        if [[ $(/usr/bin/echo ${SINKS_JSON} | /usr/bin/jq -r ".[${SINK_INDEX}] | .name") == "${BCLD_ALSA_SINK}" ]]; then
+            
+            # We are in the correct sink
+            PORT_INDEX=0
+            PORT_ENTRIES="$(( $(/usr/bin/echo "${SINKS_JSON}" | /usr/bin/jq ".[${SINK_INDEX}] | .ports" | jq length) -1))"
+            while [[ "${PORT_INDEX}" -le "${PORT_ENTRIES}" ]]; do
+
+                if [[ $(/usr/bin/echo "${SINKS_JSON}" | /usr/bin/jq -r ".[${SINK_INDEX}] | .ports | .[${PORT_INDEX}] | .name") == "${BCLD_ALSA_PORT}" ]]; then
+                    # Port exists in this sink, forcing alsa to use this sink now.
+                    /usr/bin/pacmd set-sink-port "${BCLD_ALSA_SINK}" "${BCLD_ALSA_PORT}"
+                fi
+                
+            (( PORT_INDEX++ ))
+            done
+        fi
+        
+        (( SINK_INDEX++ ))
+    done
+fi
+
+### Output
+if [[ ${BCLD_VOL} ]]; then
+    list_item "Setting BCLD output volume: ${BCLD_VOL}%"
+
+	# Use overamplication for pactl (boost over 100%)
+    BCLD_VOL_EDIT=$(( "${BCLD_VOL}" * "${PACTL_DEFAULT_VOL}" / 100 ))
+    /usr/bin/pactl set-sink-volume @DEFAULT_SINK@ "${BCLD_VOL_EDIT}%"
+else
+	# If BCLD_VOL is not set, set default to overamplify
+	list_item "Boosting default volume: ${PACTL_DEFAULT_VOL}%"
+    /usr/bin/pactl set-sink-volume @DEFAULT_SINK@ "${PACTL_DEFAULT_VOL}%"
+fi
+
+### Input
+if [[ ${BCLD_SOURCE} ]]; then
+    list_item "Setting BCLD audio source..."
+    /usr/bin/pactl set-default-source "${BCLD_SOURCE}" \
+        || list_item "BCLD_SOURCE: ${BCLD_SOURCE} not found!"
+fi
+
+### Recording Volume
+if [[ ${BCLD_REC} ]]; then
+    list_item "Setting BCLD recording volume: ${BCLD_REC}%"
+
+	# Use overamplication for pactl (boost over 100%)
+    BCLD_REC_EDIT=$(( "${BCLD_REC}" * "${PACTL_DEFAULT_REC}" / 100 ))
+    /usr/bin/pactl set-source-volume @DEFAULT_SOURCE@ "${BCLD_REC_EDIT}%"
+else
+	# If BCLD_REC is not set, set default
+	list_item "Setting BCLD recording volume to default: ${PACTL_DEFAULT_REC}%"
+    /usr/bin/pactl set-source-volume @DEFAULT_SOURCE@ "${PACTL_DEFAULT_REC}%"
+fi
+
+
+## Network
+
+### Always disable WWAN if BCLD_WWAN is NOT equal to 1
+# Leave WWAN enabled only if BCLD_WWAN is equal to 1
+if [[ "${BCLD_WWAN}" -ne 1 ]]; then
+	list_item "Disable WWAN adapter (if present)..."
+	/usr/bin/wwan off &> /dev/null
+else
+    list_item_pass "WWAN parameter detected!: Leaving enabled..."
+fi
+
+### 4TW customization: Wi-Fi only; Ethernet startup checks are disabled
+if [[ -n ${BCLD_SSID} ]]; then
+    
+	# Attempt WiFi connection if SSID is set
+    list_item "Wireless settings detected..."
+    
+    ssid_decoded="$(/usr/bin/echo "${BCLD_SSID}" | base64 -d)"
+
+	# Detect and enable WLAN before scanning for the configured SSID.
+	/usr/bin/sudo /usr/bin/nmcli radio wifi on
+	set_bcld_wireless
+    
+    ### Set default interface
+
+	list_item "Setting default wireless interface..."
+	    
+    conns=0
+    attempt=1
+    
+    # As long as there are no connections, keep trying for SCAN_TRIES.
+    while [[ "${conns}" -lt 1 ]]; do
+        list_item "Checking wireless networks...(attempt: #${attempt})"
+        conns=$(($(/usr/bin/nmcli device wifi list | /usr/bin/wc -l) - 1))
+        
+		# dhclient sometimes works erratically on slower connections
+		/usr/bin/sleep 3s
+
+		# Break out after SCAN_TRIES
+        if [[ "${attempt}" -eq "${SCAN_TRIES}" ]]; then
+        	list_item_fail "Tried ${attempt} times... Giving up."
+        	break
+    	fi
+        
+        ((attempt++))
+
+    done
+    
+    # If any connections are found, use detected parameters
+    if [[ "${conns}" -gt 0 ]]; then
+        list_item_pass "Connections found: ${conns}"
+        list_entry
+        /usr/bin/nmcli device wifi list | /usr/bin/head -11
+        list_catch
+	    
+		# Attempt to connect to SSID
+		if [[ $(/usr/bin/nmcli device wifi list | /usr/bin/grep -co "${ssid_decoded}") -gt 0 ]]; then
+		list_item_pass "Found selected wireless network: ${ssid_decoded}..."
+		
+			if [[ -n ${BCLD_PSK} ]]; then
+				# Attempt WPA-PSK if parameters are set:
+				connect_psk
+			elif [[ -n ${BCLD_EAP_METHOD} ]] && [[ -n ${BCLD_EAP_USER} ]] && [[ -n ${BCLD_EAP_PW} ]]; then
+				# Attempt PEAP if parameters are set:
+				connect_eap
+			else
+				# 4TW customization: Ethernet fallback disabled; Wi-Fi only
+				# detect_lan
+				: # Continue to BCLD's existing network-failure handling.
+		    fi
+		    
+		else
+		    list_item_fail "Selected wireless network '${ssid_decoded}' not available!"
+		    # 4TW customization: Ethernet fallback disabled; Wi-Fi only
+			# detect_lan
+		fi
+		
+    else
+        list_item_fail "No connections found!"
+		# 4TW customization: Ethernet fallback disabled; Wi-Fi only
+		# detect_lan
+    fi
+else
+	# 4TW customization: Ethernet fallback disabled; Wi-Fi only
+    list_item "No wireless settings detected..."
+	# detect_lan
+fi
+
+### Shutdown if no leases at all
+connect_establish
+
+### Rsyslogger
+# TODO Start Rsyslogger before WOL, because it somehow disables it...
+# Enable Rsyslog for Facet by default
+if [[ "${BCLD_VENDOR}" == 'facet' ]]; then
+	list_item_pass "BCLD_VENDOR set to \"${BCLD_VENDOR}\", enabling!"
+	source /usr/bin/log_tools.sh
+	log_header 'Rsyslogging enabled!'
+	/usr/bin/rsyslogger.sh &
+fi
+
+### Wake-on-LAN
+# Only do this if BCLD_WOL is not disabled
+if [[ "${BCLD_WOL}" -eq 1 ]]; then
+	# Never do this more than once
+	# Check if an interface is selected
+	list_item_pass "WOL parameter detected!"
+	/usr/bin/sudo /usr/bin/systemctl --quiet disable --now wol.service && list_item "WOL disabled..."
+else
+	enable_wol
+fi
+
+## Important umounts before logging
+bcld_umount
+
+# Startup application
+init_app

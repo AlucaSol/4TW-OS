@@ -1,0 +1,95 @@
+Add a lightweight battery-status display to the 4TW-OS BCLD Release build.
+
+Goal:
+The kiosk currently has no visible battery indicator because Qutebrowser occupies the entire display.
+
+I do NOT want to expose a general terminal, shell, desktop panel, taskbar, or system tray.
+
+Add the following keyboard shortcut:
+
+F6 = Show battery status
+
+When F6 is pressed, display a temporary non-interactive overlay/message above the current 4thewords page containing, where available:
+
+Battery: XX%
+Status: Charging / Discharging / Full
+Power draw: X.X W
+Estimated remaining: Xh Xm
+
+Requirements:
+
+1. Battery percentage is mandatory if exposed by the Linux power_supply interface.
+
+Read battery data from the standard Linux sysfs interface under:
+
+/sys/class/power_supply/BAT*/
+
+Do not install a heavyweight desktop battery manager.
+
+2. Power draw
+
+If the battery exposes:
+
+power_now
+
+use it to calculate/display watts.
+
+If power_now is unavailable but both:
+
+current_now
+voltage_now
+
+are available, calculate approximate instantaneous power from those values.
+
+If the hardware exposes neither usable method, omit the Power draw line rather than reporting an invented value.
+
+3. Estimated remaining time
+
+If sufficient battery/rate information is available, calculate or display an approximate remaining runtime.
+
+If reliable data is unavailable, omit this line.
+
+Do not invent an estimate.
+
+4. Display mechanism
+
+Prefer an existing lightweight BCLD/Qutebrowser mechanism rather than adding another desktop application.
+
+A good implementation would be a Qutebrowser/Openbox keybinding that invokes a very small shell or Python script and displays the result using Qutebrowser's own message/notification interface.
+
+If Qutebrowser's userscript/QUTE_FIFO mechanism is suitable, prefer that.
+
+The battery message should:
+- appear temporarily;
+- not open another browser tab;
+- not navigate away from 4thewords;
+- not expose a shell;
+- not require user authentication;
+- disappear automatically after a short period or normal typing.
+
+5. Security
+
+Do NOT add:
+- terminal access;
+- shell keyboard shortcuts;
+- file manager;
+- application launcher;
+- taskbar/system tray;
+- debugging services;
+- SSH.
+
+The F6 shortcut should expose only the battery information.
+
+6. Preserve all existing kiosk restrictions and Secure Boot behaviour.
+
+7. Verification
+
+Statically verify that:
+- F6 invokes only the battery-status helper;
+- the helper cannot execute arbitrary user input;
+- no shell/terminal access has been introduced;
+- missing battery fields are handled gracefully.
+
+Actual Acer battery values can be verified later on physical hardware.
+
+Do not perform a full second IMG rebuild solely to test this feature if it can be incorporated into another already-planned rebuild.

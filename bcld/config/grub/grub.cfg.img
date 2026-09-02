@@ -1,0 +1,75 @@
+# Secondary Grub config.
+# This config works when running BCLD from the IMG-file.
+
+search --label 'BCLD-USB' --no-floppy --set=root --hint=hd0,gpt2
+
+# Modules, we will try to bake these in with grub-mkstandalone
+#insmod ntfs
+#insmod video
+
+# Grub settings
+set gfxpayload="keep"
+set gfxmode="1280x1024x32"
+
+# VARs
+set ISO_FILE="/bcld.iso"
+set PLYMOUTH="quiet splash"
+set SURFACE_FIX='pci=hpiosize=0' # Fixes issue of Surface laptops not shutting down
+set SQUASHFS_PXE='layerfs-path=filesystem.squashfs'
+
+set PARAMS="iso-scan/filename=$ISO_FILE boot=casper noprompt noeject toram apparmor=0 $SURFACE_FIX $PLYMOUTH $SQUASHFS_PXE"
+set PRIOMETERS="systemd.unit=graphical.target 5"
+
+set default=0
+set color_normal=light-gray/black
+set prompt=1
+set timeout=3
+
+echo
+
+# Include bcld.cfg if it exists.
+if [ -s /bcld.cfg ]; then
+    source /bcld.cfg
+    echo '   (1/5) BCLD configuration file detected!'
+else
+    echo '   (1/5) No BCLD configuration file found...'
+fi
+
+# Check for bcld.log.
+if [ -f /bcld.log ]; then
+    echo '   (2/5) BCLD log file detected!'
+else
+    echo '   (2/5) No BCLD log file found...'
+fi
+
+# Load ISO_FILE, kernel and RAMFS.
+loopback loop $ISO_FILE
+
+
+# Load the kernel (vmlinuz)
+if [ -s (loop)/casper/vmlinuz ]; then
+    linux (loop)/casper/vmlinuz ${PARAMS} ${bcldparameters} ${PRIOMETERS} ---
+    echo '   (3/5) Kernel loaded!'
+else
+    echo '   (3/5) Kernel (vmlinuz) cannot be loaded.'
+    echo '   (3/5) The system will not be able to function.'
+    echo '   (3/5) Shutting down now...'
+    sleep --verbose 10
+    halt
+fi
+
+
+if [ -s (loop)/casper/initrd ]; then
+    initrd (loop)/casper/initrd
+    echo '   (4/5) File system loaded!'
+else
+    echo '   (4/5) File system (initrd) cannot be loaded.' 
+    echo '   (4/5) The system will not be able to function.'
+    echo '   (4/5) Shutting down now...'
+    sleep --verbose 10
+    halt
+fi
+
+# Apply all settings.
+echo '   (5/5) Launching Bootable Client Lockdown!'
+boot
