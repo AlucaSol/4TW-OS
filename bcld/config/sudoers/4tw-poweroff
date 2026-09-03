@@ -1,0 +1,1 @@
+@BCLD_USER@ ALL=(root) NOPASSWD: /usr/local/sbin/4tw-poweroff ""

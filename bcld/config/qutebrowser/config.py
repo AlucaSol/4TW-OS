@@ -33,9 +33,9 @@ c.auto_save.session = False
 c.colors.messages.error.fg = 'rgba(0,0,0,0)'
 c.colors.messages.error.bg = 'rgba(0,0,0,0)'
 c.colors.messages.error.border = 'rgba(0,0,0,0)'
-c.colors.messages.info.bg = '#202020'
-c.colors.messages.info.border = '#202020'
-c.colors.messages.info.fg = 'white'
+c.colors.messages.info.bg = 'rgba(0,0,0,0)'
+c.colors.messages.info.border = 'rgba(0,0,0,0)'
+c.colors.messages.info.fg = 'rgba(0,0,0,0)'
 c.colors.tabs.selected.even.bg = 'white'
 c.colors.tabs.selected.even.fg = 'black'
 c.colors.tabs.selected.odd.bg = 'white'
@@ -49,7 +49,6 @@ c.fonts.tabs.selected = 'bold default_size default_family'
 c.fonts.tabs.unselected = 'italic default_size default_family'
 c.input.mode_override = 'passthrough'
 c.input.mouse.rocker_gestures = True
-c.messages.timeout = 5000
 c.statusbar.show = 'never'
 c.tabs.background = False
 c.tabs.indicator.width = 0
@@ -57,9 +56,4 @@ c.tabs.last_close = 'startpage'
 c.tabs.new_position.related = 'next'
 c.tabs.new_position.unrelated = 'next'
 c.tabs.show = 'multiple'
-
-config.bind(
-    '<F6>',
-    'spawn --userscript /usr/bin/bcld_battery.sh',
-    mode='passthrough',
-)
+c.url.start_pages = []

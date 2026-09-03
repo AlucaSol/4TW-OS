@@ -583,6 +583,15 @@ function copy_post_config_dirs () {
 function copy_post_configs () {
 	list_item "Copying postconfiguration files..."
 
+	prep_dir "${CHROOT_DIR}/usr/local/sbin"
+	copy_file "${SCRIPT_DIR}/4tw-poweroff.sh" "${CHROOT_DIR}/usr/local/sbin/4tw-poweroff"
+	/usr/bin/chown 0:0 "${CHROOT_DIR}/usr/local/sbin/4tw-poweroff"
+	/usr/bin/chmod 755 "${CHROOT_DIR}/usr/local/sbin/4tw-poweroff"
+	copy_file "${CONFIG_DIR}/sudoers/4tw-poweroff" "${CHROOT_DIR}/etc/sudoers.d/4tw-poweroff"
+	/usr/bin/sed -i "s/@BCLD_USER@/${BCLD_USER}/g" "${CHROOT_DIR}/etc/sudoers.d/4tw-poweroff"
+	/usr/bin/chown 0:0 "${CHROOT_DIR}/etc/sudoers.d/4tw-poweroff"
+	/usr/bin/chmod 440 "${CHROOT_DIR}/etc/sudoers.d/4tw-poweroff"
+
 	copy_file "${CONFIG_DIR}/modprobe/alsa-base.conf" "${CHROOT_DIR}/etc/modprobe.d/alsa-base.conf"
 	copy_file "${CONFIG_DIR}/modprobe/blacklist.conf" "${CHROOT_DIR}/etc/modprobe.d/blacklist.conf"
     copy_file "${CONFIG_DIR}/modprobe/copyfail_dirtyfrag_mitigation.conf" "${CHROOT_DIR}/etc/modprobe.d/copyfail_dirtyfrag_mitigation.conf"

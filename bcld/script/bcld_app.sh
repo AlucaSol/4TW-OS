@@ -55,6 +55,13 @@ TAG="RUN-APP"
 # For automatic certificate selection
 /usr/bin/autocert.sh
 
-# Launch app with BCLD_OPTS
-/usr/bin/bash -c "${BCLD_APP} ${BCLD_OPTS}" &> "${OPENBOX_LOG}" &
+# Vendorless Qutebrowser gets exactly one configured URL as a positional
+# argument. This avoids a separate generated start_pages entry and does not
+# interpret the writable bcld.cfg URL as shell code.
+if [[ "${BCLD_RUN}" == 'qutebrowser' ]] && [[ "${BCLD_VENDOR}" == 'vendorless' ]]; then
+    "${BCLD_APP}" "${BCLD_URL:-${BCLD_DEFAULT_URL}}" &> "${OPENBOX_LOG}" &
+else
+    # Preserve the existing launch path for upstream BCLD applications.
+    /usr/bin/bash -c "${BCLD_APP} ${BCLD_OPTS}" &> "${OPENBOX_LOG}" &
+fi
 

@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Qutebrowser userscript: report the first battery exposed by Linux sysfs.
-# It accepts no input and emits only a fixed message-info command to QUTE_FIFO.
+# Report the first battery exposed by Linux sysfs in a temporary X11 message.
+# This fixed-purpose helper accepts no input and never launches a terminal.
 
-if [[ -z "${QUTE_FIFO:-}" || ! -p "${QUTE_FIFO}" || ! -w "${QUTE_FIFO}" ]]; then
-    exit 0
+if [[ "$#" -ne 0 ]]; then
+    exit 64
 fi
 
 read_sysfs_value() {
@@ -30,11 +30,15 @@ absolute_value() {
     printf '%d' "$((10#${value}))"
 }
 
-send_message() {
+show_message() {
     local message="$1"
 
-    message="${message//\'/\\\'}"
-    printf "message-info '%s'\n" "${message}" > "${QUTE_FIFO}"
+    exec /usr/bin/xmessage \
+        -center \
+        -timeout 5 \
+        -buttons '' \
+        -title '4TW-OS Battery' \
+        "${message}" >/dev/null 2>&1
 }
 
 battery_path=''
@@ -46,7 +50,7 @@ for candidate in /sys/class/power_supply/BAT*; do
 done
 
 if [[ -z "${battery_path}" ]]; then
-    send_message 'Battery: unavailable'
+    show_message 'Battery: unavailable'
     exit 0
 fi
 
@@ -68,7 +72,7 @@ if read_sysfs_value "${battery_path}/status"; then
     esac
 fi
 if [[ -n "${status}" ]]; then
-    message+=" | Status: ${status}"
+    message+=$'\n'"Status: ${status}"
 fi
 
 power_uw=''
@@ -96,7 +100,7 @@ fi
 
 if [[ -n "${power_uw}" ]]; then
     power_watts="$(/usr/bin/awk -v microwatts="${power_uw}" 'BEGIN { printf "%.1f", microwatts / 1000000 }')"
-    message+=" | Power draw: ${power_watts} W"
+    message+=$'\n'"Power draw: ${power_watts} W"
 fi
 
 remaining_minutes=''
@@ -117,7 +121,7 @@ if [[ "${status}" == 'Discharging' ]]; then
 fi
 
 if [[ -n "${remaining_minutes}" && "${remaining_minutes}" -gt 0 ]]; then
-    message+=" | Estimated remaining: $((remaining_minutes / 60))h $((remaining_minutes % 60))m"
+    message+=$'\n'"Estimated remaining: $((remaining_minutes / 60))h $((remaining_minutes % 60))m"
 fi
 
-send_message "${message}"
+show_message "${message}"
