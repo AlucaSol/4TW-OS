@@ -1,0 +1,23 @@
+#!/bin/sh
+# This is the kiosk account's login program, not an interactive shell.
+[ "$#" -eq 0 ] || exit 2
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=sway
+export MOZ_ENABLE_WAYLAND=1
+export XDG_CACHE_HOME="$XDG_RUNTIME_DIR/cache"
+export XDG_CONFIG_HOME=/etc/4tw/user-config
+mkdir -p "$XDG_CACHE_HOME"
+# Prefer the DRM card driving the internal panel. Leave auto-detection intact
+# when no connected internal connector is reported (e.g. a firmware GPU mux).
+for connector in /sys/class/drm/card*-eDP-* /sys/class/drm/card*-LVDS-* /sys/class/drm/card*-DSI-*; do
+    [ -r "$connector/status" ] || continue
+    [ "$(/usr/bin/cat "$connector/status")" = connected ] || continue
+    card=${connector##*/}
+    card=${card%%-*}
+    [ -c "/dev/dri/$card" ] || continue
+    export WLR_DRM_DEVICES="/dev/dri/$card"
+    break
+done
+/usr/bin/dbus-run-session -- /usr/bin/sway --config /etc/4tw/sway.conf
+# Compositor exit cannot fall through into a desktop or login shell.
+exec /usr/bin/sudo -n /usr/local/sbin/4tw-poweroff
