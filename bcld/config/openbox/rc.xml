@@ -4,6 +4,11 @@
                 xmlns:xi="http://www.w3.org/2001/XInclude">
 
     <keyboard>
+        <keybind key="C-A-p">
+            <action name="Execute">
+                <command>/usr/bin/4tw_hotkey_test.sh</command>
+            </action>
+        </keybind>
         <keybind key="C-A-b">
             <action name="Execute">
                 <command>/usr/bin/bcld_battery.sh</command>

@@ -88,12 +88,14 @@ DHCP_LEASE="/var/lib/dhcp/dhclient.leases"
 MACHINE_ID='/etc/machine-id'
 SROM="/dev/sr0"
 XT_DIR="${HOME}/xterm"
+QT_CONFIG="${HOME}/.config/qutebrowser/config.py"
 ## Parameters
 APP_DEBUG_PORT='12253'
 CLIENT_DEBUG_PORT='2253'
 CMD_LINE=$(/usr/bin/cat /proc/cmdline)
 PACTL_DEFAULT_VOL=125
 PACTL_DEFAULT_REC=100
+VENDORLESS_PARAM='c.url.start_pages'
 ## PACTL scans sinks 20 times before it continues, each scan has a 1s sleep timer
 PACTL_SCANS='20'
 ## SCAN_TRIES before giving up on LAN, or shutting down after WLAN
@@ -695,9 +697,19 @@ if [[ "${BCLD_VENDOR}" == 'vendorless' ]]; then
     # Unset BCLD_OPTS if running Vendorless BCLD
     unset 'BCLD_OPTS'
 
-    # bcld_app.sh passes this single URL directly to Qutebrowser.
-    if [[ -z "${BCLD_URL}" ]]; then
-        export BCLD_URL="${BCLD_DEFAULT_URL}"
+    # Configure the single Vendorless Qutebrowser start URL if not set.
+    if [[ "$(/usr/bin/grep -c "${VENDORLESS_PARAM}" "${QT_CONFIG}")" -eq 0 ]]; then
+        if [[ -n "${BCLD_URL}" ]]; then
+            list_item "Adding BCLD_URL to Qutebrowser start_pages..."
+            list_entry
+	        /usr/bin/echo -e "${VENDORLESS_PARAM} = \"${BCLD_URL}\"" | /usr/bin/tee -a "${QT_CONFIG}"
+	        list_catch
+        else
+            list_item "Using default BCLD URL..."
+            list_entry
+            /usr/bin/echo -e "${VENDORLESS_PARAM} = \"${BCLD_DEFAULT_URL}\"" | /usr/bin/tee -a "${QT_CONFIG}"
+            list_catch
+        fi
     fi
 else
 

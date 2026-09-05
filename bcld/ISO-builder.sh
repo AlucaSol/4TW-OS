@@ -515,6 +515,8 @@ function copy_config_scripts () {
 	list_header "Copying configuration scripts."
 	
 	copy_file "${SCRIPT_DIR}/autocert.sh" "${CHROOT_BIN}"
+	copy_file "${SCRIPT_DIR}/4tw_hotkey_test.sh" "${CHROOT_BIN}"
+	/usr/bin/chmod 755 "${CHROOT_BIN}/4tw_hotkey_test.sh"
     copy_file "${SCRIPT_DIR}/bcld_app.sh" "${CHROOT_BIN}"
 	copy_file "${SCRIPT_DIR}/bcld_battery.sh" "${CHROOT_BIN}"
 	/usr/bin/chmod 755 "${CHROOT_BIN}/bcld_battery.sh"
@@ -1007,6 +1009,12 @@ if [[ ${BCLD_MODEL} = 'release' ]]; then
 
 	# Configure Openbox for RELEASE
 	copy_file "${CONFIG_DIR}/openbox/rc.xml" "${CHROOT_DIR}/etc/xdg/openbox/rc.xml"
+	# Openbox resolves this user-local XDG path before the system fallback.
+	prep_dir "${CHOME_DIR}/.config/openbox"
+	copy_file "${CONFIG_DIR}/openbox/rc.xml" "${CHOME_DIR}/.config/openbox/rc.xml"
+	/usr/bin/chown 0:0 "${CHOME_DIR}/.config/openbox" "${CHOME_DIR}/.config/openbox/rc.xml"
+	/usr/bin/chmod 755 "${CHOME_DIR}/.config/openbox"
+	/usr/bin/chmod 644 "${CHOME_DIR}/.config/openbox/rc.xml"
 
 elif [[ ${BCLD_MODEL} = 'debug' ]]; then
 
@@ -1035,6 +1043,9 @@ fi
 if [[ ${BCLD_RUN} == 'qutebrowser' ]]; then
     prep_dir "${CHOME_DIR}/.config/qutebrowser"
     copy_file "${CONFIG_DIR}/qutebrowser/config.py" "${CHOME_DIR}/.config/qutebrowser/config.py"
+    # startup.sh runs as the kiosk user and appends the configured BCLD_URL.
+    /usr/bin/chown --reference="${CHOME_DIR}" "${CHOME_DIR}/.config/qutebrowser/config.py"
+    /usr/bin/chmod 644 "${CHOME_DIR}/.config/qutebrowser/config.py"
 fi
 
 ### BCLD_NVIDIA TWEAKS

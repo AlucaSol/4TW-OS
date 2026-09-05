@@ -10,7 +10,7 @@ b0da6cbaaf9e9d66c2dc962aafda21b4  ./.github/workflows/release.yml
 04aff3cce210e9c2a8f21df593f07b19  ./COPYING
 5380cf8977e7129aa0404d8dc37acee6  ./Docker-builder.sh
 ef29c64bd35fec47b154096be5a4c7d0  ./IMG-builder.sh
-437b228fef222f7d03edf1deb4a04726  ./ISO-builder.sh
+716055f7d857409d638be23baf71798d  ./ISO-builder.sh
 524b704f7687543521a4f126f3b50422  ./LICENSE.eupl
 6c2d2e7cdce2aac73890d33e5db90496  ./README.md
 f6c4276a99ee9de5b0bc0e385f7f4b57  ./RepoMan.sh
@@ -48,7 +48,7 @@ ab23e76d42c8177569124b709cf36a10  ./config/modprobe/alsa-base.conf
 5b19b43c2beaa7bcdf82ef510a4514ea  ./config/network-manager/conf.d/default-wifi-powersave-on.conf
 98230f0794ee06f1899c3fd3c9f3f4d3  ./config/network-manager/interfaces
 6e2f77bbba38b224e732db10952118a1  ./config/openbox/autostart
-db4a0cdc69b5c0b82ab3d42ab77965e9  ./config/openbox/rc.xml
+5c5812647cf8322dceebf93baba1273d  ./config/openbox/rc.xml
 d93c0ecfa96fe619d9503decf1193dd3  ./config/openbox/rc.xml.debug
 d57cf84974e9a959d64a38710983a18d  ./config/packages/APP
 077a8a5014546daf883328e708b9dfbd  ./config/packages/BUILD
@@ -64,7 +64,7 @@ e7c3341206da6e77bfed1923d6a11883  ./config/packages/selections.conf
 1540737da39ba1e9ca293b7b895c4ff9  ./config/pam/login
 96344c894c2836c1a32576446d2cdf0f  ./config/plymouth/bcld-plymouth.png
 75f079515178bd3a0d2247fe9b97810e  ./config/plymouth/spinner.plymouth
-57221dd199a88af47dfeafc1381b6cc2  ./config/qutebrowser/config.py
+807749596e6114c467f58647034ff738  ./config/qutebrowser/config.py
 78c908f9f98459b21ca703c224b13ff1  ./config/rsyslog/60-BCLD-rsyslog.conf
 99a066c03d7370e2c2ec85e0c018ffab  ./config/rsyslog/70-bcld-log.conf
 839a246d0beff6ae472592222699630d  ./config/sudoers/4tw-poweroff
@@ -103,9 +103,10 @@ c99677e6deb495fb2b90cbfb84ac7349  ./config/udev/rules.d/BCLD-USB.rules
 87ecdd57738b7ed7fe23e3da8a492593  ./image/ISO/README.diskdefines
 49a4210f52e5bcc79077d12c3dfd63f5  ./image/ISO/isolinux/isolinux.cfg
 b2b0d8bd5e999c5c2cdc2491038c5264  ./script/4tw-poweroff.sh
+dfe815b6ec60034021b9f2ad20fb9968  ./script/4tw_hotkey_test.sh
 b901f8f3921cc3d098a252057538c5aa  ./script/Xconfigure.sh
 3f0e4d55a962e4dd009c1ae8c4db7739  ./script/autocert.sh
-5a2cab4c1424e28ed9744192a1d21dd7  ./script/bcld_app.sh
+59246f7b00cef721f2639bdb6d90320d  ./script/bcld_app.sh
 46faa0151e26a3c2a582a6d129c39717  ./script/bcld_battery.sh
 caeaba6f3ea103a2d0ee5a68b44baa93  ./script/bcld_vendor.sh
 1a18b47f0ca191fb76fba2942d98ee16  ./script/chroot.sh
@@ -116,7 +117,7 @@ ae7f9f52e4d6465ccbd9545c91432d7c  ./script/echo_tools.sh
 582c1f3f44207520fcadc5d49a2efac9  ./script/file_operations.sh
 07de693b053c97f6f8d44c43d0ab202b  ./script/log_tools.sh
 28e9885af3925d9492f72cd9c34f796d  ./script/rsyslogger.sh
-3aabf81979e9750c4690429cc7ab541c  ./script/startup.sh
+6f324534cc60ae10339bb027a2ec398e  ./script/startup.sh
 d267254e779d5f15b28f8f79442f707d  ./script/usb_logger.sh
 4dbccc99d58adefa2e9815705d46c766  ./test/00_BCLD-BUILD.bats
 0b1d119254ad08f0c28a1975b28bbc2a  ./test/BCLD-BATS.sh

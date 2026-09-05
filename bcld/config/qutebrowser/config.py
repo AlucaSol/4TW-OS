@@ -56,4 +56,3 @@ c.tabs.last_close = 'startpage'
 c.tabs.new_position.related = 'next'
 c.tabs.new_position.unrelated = 'next'
 c.tabs.show = 'multiple'
-c.url.start_pages = []
